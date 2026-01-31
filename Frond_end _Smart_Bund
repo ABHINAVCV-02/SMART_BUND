@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Bund</title>
+<style>
+body { background:#0f172a; color:white; font-family:Arial; text-align:center }
+.card { background:#1e293b; padding:20px; margin:15px; border-radius:12px }
+button { padding:14px 22px; font-size:16px; margin:10px; border-radius:8px }
+</style>
+</head>
+
+<body>
+<h2>Smart Bund Dashboard</h2>
+
+<div class="card">
+<h3>Temperature</h3>
+<h1 id="temp">--</h1>
+</div>
+
+<div class="card">
+<h3>Humidity</h3>
+<h1 id="hum">--</h1>
+</div>
+
+<div class="card">
+<h3>Soil</h3>
+<h1 id="soil">--</h1>
+</div>
+
+<div class="card">
+<h3>Pump</h3>
+<h1 id="pump">--</h1>
+</div>
+
+<div class="card">
+<h3>Motor</h3>
+<button onclick="motor('forward')">Forward</button>
+<button onclick="motor('backward')">Backward</button>
+<button onclick="motor('stop')">Stop</button>
+</div>
+
+<script>
+const ESP_IP = "http://192.168.4.1";
+
+function loadData() {
+  fetch(`${ESP_IP}/api/data`)
+    .then(r => r.json())
+    .then(d => {
+      temp.innerHTML = d.temperature + " °C";
+      hum.innerHTML  = d.humidity + " %";
+      soil.innerHTML = d.soil;
+      pump.innerHTML = d.pump;
+    });
+}
+
+function motor(dir) {
+  fetch(`${ESP_IP}/api/motor/${dir}`, { method: "POST" });
+}
+
+setInterval(loadData, 2000);
+</script>
+
+</body>
+</html>
