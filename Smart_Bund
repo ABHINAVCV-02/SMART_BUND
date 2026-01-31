@@ -1,0 +1,176 @@
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <DNSServer.h>
+#include "DHT.h"
+
+/* ---------------- PIN CONFIG ---------------- */
+#define DHTPIN 4
+#define DHTTYPE DHT11
+
+#define SOIL_PIN 34
+#define RELAY_PIN 26    // Active LOW relay
+
+#define IN1 14
+#define IN2 27
+
+/* ---------------- WIFI ---------------- */
+const char* ssid = "Smart Bund";
+const char* password = "12345678";
+
+/* ---------------- DNS ---------------- */
+DNSServer dnsServer;
+const byte DNS_PORT = 53;
+
+/* ---------------- GLOBAL ---------------- */
+int soilThreshold = 2500;   // Adjust after calibration
+
+/* ---------------- HTML ---------------- */
+const char index_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Bund</title>
+<style>
+body { background:#0f172a; color:white; font-family:Arial; text-align:center }
+.card { background:#1e293b; padding:20px; margin:15px; border-radius:12px }
+button { padding:14px 22px; font-size:16px; margin:10px; border-radius:8px }
+</style>
+</head>
+
+<body>
+<h2>Smart Bund – Weather & Irrigation</h2>
+
+<div class="card">
+<h3>Temperature</h3>
+<h1 id="temp">-- °C</h1>
+</div>
+
+<div class="card">
+<h3>Humidity</h3>
+<h1 id="hum">-- %</h1>
+</div>
+
+<div class="card">
+<h3>Soil Status</h3>
+<h1 id="soil">--</h1>
+</div>
+
+<div class="card">
+<h3>Pump Relay</h3>
+<h1 id="relay">--</h1>
+</div>
+
+<div class="card">
+<h3>Motor Control</h3>
+<button onclick="fetch('/forward')">Forward</button>
+<button onclick="fetch('/backward')">Backward</button>
+<button onclick="fetch('/stop')">Stop</button>
+</div>
+
+<script>
+setInterval(()=>{
+fetch('/data')
+.then(r=>r.json())
+.then(d=>{
+document.getElementById("temp").innerHTML = d.temp + " °C";
+document.getElementById("hum").innerHTML = d.hum + " %";
+document.getElementById("soil").innerHTML = d.soil;
+document.getElementById("relay").innerHTML = d.relay;
+});
+},2000);
+</script>
+
+</body>
+</html>
+)rawliteral";
+
+/* ---------------- OBJECTS ---------------- */
+DHT dht(DHTPIN, DHTTYPE);
+AsyncWebServer server(80);
+
+/* ---------------- SENSOR LOGIC ---------------- */
+String getSensorData() {
+  float temp = dht.readTemperature();
+  float hum  = dht.readHumidity();
+  int soil   = analogRead(SOIL_PIN);
+
+  String soilStatus;
+  String relayStatus;
+
+  // ✅ Correct soil logic
+  if (soil > soilThreshold) {
+    soilStatus = "DRY";
+    digitalWrite(RELAY_PIN, LOW);    // Pump ON
+    relayStatus = "ON";
+  } else {
+    soilStatus = "WET";
+    digitalWrite(RELAY_PIN, HIGH);   // Pump OFF
+    relayStatus = "OFF";
+  }
+
+  return "{"
+         "\"temp\":" + String(temp) + ","
+         "\"hum\":" + String(hum) + ","
+         "\"soil\":\"" + soilStatus + "\","
+         "\"relay\":\"" + relayStatus + "\""
+         "}";
+}
+
+/* ---------------- SETUP ---------------- */
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, HIGH);   // Pump OFF at boot
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);          // Motor STOP at boot
+
+  dht.begin();
+
+  WiFi.softAP(ssid, password);
+  delay(200);
+
+  dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) {
+    req->send_P(200, "text/html", index_html);
+  });
+
+  server.on("/data", HTTP_GET, [](AsyncWebServerRequest *req) {
+    req->send(200, "application/json", getSensorData());
+  });
+
+  server.on("/forward", HTTP_GET, [](AsyncWebServerRequest *req) {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+    req->send(200, "text/plain", "Motor Forward");
+  });
+
+  server.on("/backward", HTTP_GET, [](AsyncWebServerRequest *req) {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+    req->send(200, "text/plain", "Motor Backward");
+  });
+
+  server.on("/stop", HTTP_GET, [](AsyncWebServerRequest *req) {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, LOW);
+    req->send(200, "text/plain", "Motor Stop");
+  });
+
+  server.onNotFound([](AsyncWebServerRequest *req) {
+    req->redirect("/");
+  });
+
+  server.begin();
+}
+
+/* ---------------- LOOP ---------------- */
+void loop() {
+  dnsServer.processNextRequest();
+}
