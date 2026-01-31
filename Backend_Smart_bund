@@ -1,0 +1,83 @@
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include "DHT.h"
+
+/* ------------ CONFIG ------------ */
+#define DHTPIN 4
+#define DHTTYPE DHT11
+#define SOIL_PIN 34
+#define RELAY_PIN 26
+#define IN1 14
+#define IN2 27
+
+const char* ssid = "Smart Bund";
+const char* password = "12345678";
+
+int soilThreshold = 2500;
+
+/* ------------ OBJECTS ------------ */
+DHT dht(DHTPIN, DHTTYPE);
+AsyncWebServer server(80);
+
+/* ------------ SENSOR API ------------ */
+String sensorJSON() {
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+  int soil = analogRead(SOIL_PIN);
+
+  bool pumpOn = soil > soilThreshold;
+  digitalWrite(RELAY_PIN, pumpOn ? LOW : HIGH);
+
+  return "{"
+         "\"temperature\":" + String(t) + ","
+         "\"humidity\":" + String(h) + ","
+         "\"soil\":\"" + String(pumpOn ? "DRY" : "WET") + "\","
+         "\"pump\":\"" + String(pumpOn ? "ON" : "OFF") + "\""
+         "}";
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+
+  digitalWrite(RELAY_PIN, HIGH);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+
+  dht.begin();
+
+  WiFi.softAP(ssid, password);
+  Serial.println(WiFi.softAPIP());
+
+  /* ---------- APIs ---------- */
+
+  server.on("/api/data", HTTP_GET, [](AsyncWebServerRequest *req) {
+    req->send(200, "application/json", sensorJSON());
+  });
+
+  server.on("/api/motor/forward", HTTP_POST, [](AsyncWebServerRequest *req) {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+    req->send(200);
+  });
+
+  server.on("/api/motor/backward", HTTP_POST, [](AsyncWebServerRequest *req) {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+    req->send(200);
+  });
+
+  server.on("/api/motor/stop", HTTP_POST, [](AsyncWebServerRequest *req) {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, LOW);
+    req->send(200);
+  });
+
+  server.begin();
+}
+
+void loop() {}
